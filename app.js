@@ -734,18 +734,43 @@ function doSaveSession(name){
     return false;
   }
   const finalName = (name && name.trim()) ? name.trim() : ('Session ' + new Date().toLocaleString());
-  try{
-    const sessions = getSessions();
+  const MAX_SESSIONS = 5; // keep only the 5 most recent sessions to stay under the quota
+
+  function attemptSave(){
+    let sessions = getSessions();
     sessions.unshift({
       id: 'sess_'+Date.now(),
       name: finalName,
       savedAt: new Date().toLocaleString(),
       snapshot: currentSnapshot(),
     });
+    if(sessions.length > MAX_SESSIONS){
+      sessions = sessions.slice(0, MAX_SESSIONS);
+    }
     saveSessions(sessions);
+  }
+
+  try{
+    attemptSave();
     return true;
   }catch(e){
-    toast('Save failed: '+e.message, true);
+    const isQuotaError = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message||''));
+    if(isQuotaError){
+      // Storage is full: drop the oldest saved session(s) and retry once.
+      try{
+        let sessions = getSessions();
+        if(sessions.length > 0){
+          sessions.pop(); // remove the oldest session
+          saveSessions(sessions);
+          attemptSave();
+          toast('Storage was full — the oldest saved session was removed to make room ✓');
+          return true;
+        }
+      }catch(e2){ /* still failing even after trimming — fall through */ }
+      toast('Storage is still full even after removing old sessions. Delete some sessions manually in Step 6, or paste a smaller PO file.', true);
+    } else {
+      toast('Save failed: '+e.message, true);
+    }
     return false;
   }
 }
