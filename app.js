@@ -186,6 +186,7 @@ function processDump(headers, rows){
     desc: findKey(headers, ['Item Description','Description']),
     unit: findKey(headers, ['Unit']),
     qtyOpen: findKey(headers, ['Quantity Open']),
+    qty: findKey(headers, ['Quantity']),
     price: findKey(headers, ['Net Unit Price']),
     priceUnit: findKey(headers, ['Net Unit Price Per']),
     currency: findKey(headers, ['Currency']),
@@ -216,8 +217,9 @@ function processDump(headers, rows){
     const selfBilling = key.selfBilling ? parseBool(r[key.selfBilling]) : false;
     const deletedBlocked = key.deletedBlocked ? parseBool(r[key.deletedBlocked]) : false;
     const qtyOpen = key.qtyOpen ? parseNum(r[key.qtyOpen]) : 0;
+    const qty = key.qty ? parseNum(r[key.qty]) : qtyOpen;
 
-    if(selfBilling || deletedBlocked || qtyOpen<=0){
+    if(selfBilling || deletedBlocked){
       excluded++;
       return;
     }
@@ -229,6 +231,7 @@ function processDump(headers, rows){
       description: key.desc ? r[key.desc] : '',
       unit: key.unit ? r[key.unit] : 'PCE',
       quantityOpen: qtyOpen,
+      quantity: qty,
       netUnitPrice: key.price ? parseNum(r[key.price]) : 0,
       netUnitPricePer: key.priceUnit ? (parseNum(r[key.priceUnit]) || 1) : 1,
       currency: key.currency ? r[key.currency] : 'IQD',
@@ -404,12 +407,12 @@ function buildInvoices(){
     const first = items[0];
     const mapEntry = state.invoiceMap[poNorm];
     const lineItems = items.map(it=>{
-      const netAmount = it.quantityOpen * it.netUnitPrice * it.netUnitPricePer;
+      const netAmount = it.quantity * it.netUnitPrice * it.netUnitPricePer;
       const calcVat = netAmount * (vatPercent/100);
       const gross = netAmount + calcVat;
       return {
         po: it.poRaw, itemNo: it.itemNo, description: it.description, unit: it.unit,
-        quantity: it.quantityOpen, netUnitPrice: it.netUnitPrice, currency: it.currency,
+        quantity: it.quantity, netUnitPrice: it.netUnitPrice, currency: it.currency,
         netUnitPricePer: it.netUnitPricePer, netAmount, vatPercent, vatAmount: 0,
         calcVat, gross, buyerMaterialCode: it.buyerMaterialCode,
         materialService: 'Material', targetSystem: it.targetSystem, paymentTerms: it.paymentTerms,
@@ -734,43 +737,18 @@ function doSaveSession(name){
     return false;
   }
   const finalName = (name && name.trim()) ? name.trim() : ('Session ' + new Date().toLocaleString());
-  const MAX_SESSIONS = 5; // keep only the 5 most recent sessions to stay under the quota
-
-  function attemptSave(){
-    let sessions = getSessions();
+  try{
+    const sessions = getSessions();
     sessions.unshift({
       id: 'sess_'+Date.now(),
       name: finalName,
       savedAt: new Date().toLocaleString(),
       snapshot: currentSnapshot(),
     });
-    if(sessions.length > MAX_SESSIONS){
-      sessions = sessions.slice(0, MAX_SESSIONS);
-    }
     saveSessions(sessions);
-  }
-
-  try{
-    attemptSave();
     return true;
   }catch(e){
-    const isQuotaError = e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message||''));
-    if(isQuotaError){
-      // Storage is full: drop the oldest saved session(s) and retry once.
-      try{
-        let sessions = getSessions();
-        if(sessions.length > 0){
-          sessions.pop(); // remove the oldest session
-          saveSessions(sessions);
-          attemptSave();
-          toast('Storage was full — the oldest saved session was removed to make room ✓');
-          return true;
-        }
-      }catch(e2){ /* still failing even after trimming — fall through */ }
-      toast('Storage is still full even after removing old sessions. Delete some sessions manually in Step 6, or paste a smaller PO file.', true);
-    } else {
-      toast('Save failed: '+e.message, true);
-    }
+    toast('Save failed: '+e.message, true);
     return false;
   }
 }
