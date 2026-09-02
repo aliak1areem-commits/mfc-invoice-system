@@ -603,10 +603,11 @@ async function exportExcel(){
       inv.invoiceDate, inv.currency, '', inv.bankAccount,
       '', inv.targetSystem, inv.paymentTerms
     ];
-    setRow(hdrRow, hdrVals, null, false);
+        setRow(hdrRow, hdrVals, null, false);
     [2,9,12].forEach(colIdx=>{
       ws.getCell(hdrRow, colIdx).fill = {type:'pattern', pattern:'solid', fgColor:{argb:YELLOW_BG}};
     });
+    ws.getCell(hdrRow, 9).numFmt = '@'; // force Invoice Date cell to stay plain text — stops Excel from converting it into a real Date and re-formatting with slashes
 
     const lineLabelRow = hdrRow+1;
     setRow(lineLabelRow, LINE_LABELS, GREEN_LABEL_BG, true);
