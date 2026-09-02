@@ -607,8 +607,14 @@ async function exportExcel(){
     [2,9,12].forEach(colIdx=>{
       ws.getCell(hdrRow, colIdx).fill = {type:'pattern', pattern:'solid', fgColor:{argb:YELLOW_BG}};
     });
-    ws.getCell(hdrRow, 9).numFmt = '@'; // force Invoice Date cell to stay plain text — stops Excel from converting it into a real Date and re-formatting with slashes
-
+    // Write Invoice Date as a REAL Excel date cell (not text) — Nokia's importer
+    // validates the cell's actual date type, not just the displayed text.
+    const dateParts = String(inv.invoiceDate).split('-');
+    if(dateParts.length === 3){
+      const dCell = ws.getCell(hdrRow, 9);
+      dCell.value = new Date(Date.UTC(parseInt(dateParts[0],10), parseInt(dateParts[1],10)-1, parseInt(dateParts[2],10)));
+      dCell.numFmt = 'yyyy-mm-dd';
+    }
     const lineLabelRow = hdrRow+1;
     setRow(lineLabelRow, LINE_LABELS, GREEN_LABEL_BG, true);
 
