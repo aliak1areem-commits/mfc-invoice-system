@@ -18,12 +18,17 @@ const LINE_LABELS = [
   "PO Payment Terms", "Shipped from Country", "Shipped to Country"
 ];
 
+// How close Net × (1 + VAT%/100) must land to the Step 2 target Invoice Amount
+// to be considered "matched" (in currency units, e.g. IQD). Small tolerance to
+// absorb rounding from quantity/price decimals.
+const TARGET_TOLERANCE = 1;
+
 /* ---------------------- App state ---------------------- */
 let state = {
   dumpRows: [],       // parsed+filtered available line items
   dumpRawCount: 0,
   excludedCount: 0,
-  invoiceMap: {},      // normalizedPO -> {site, invoiceNumber}
+  invoiceMap: {},      // normalizedPO -> {site, invoiceNumber, invoiceAmount}
   mapRawCount: 0,
   invoices: [],        // built invoice objects
 };
@@ -54,6 +59,20 @@ function parseNum(v){
   return isNaN(n) ? 0 : n;
 }
 
+// Like parseNum, but tolerant of currency text such as "IQD 394,515" or
+// "394,515 IQD". Strips everything except digits/dot/minus. Returns null
+// (not 0) when there's nothing usable, so callers can distinguish
+// "no target given" from "target is zero".
+function parseCurrency(v){
+  if(v===undefined||v===null) return null;
+  let s = String(v).trim();
+  if(s==='') return null;
+  s = s.replace(/[^0-9.\-]/g,'');
+  if(s===''||s==='-') return null;
+  let n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
 function parseBool(v){
   if(typeof v === 'boolean') return v;
   return String(v).trim().toUpperCase() === 'TRUE';
@@ -75,6 +94,26 @@ function fmtNum(n){
 function escHtml(s){
   if(s===undefined||s===null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Splits `total` across `weights` (proportional to each weight's share of
+// the sum), rounded to 2 decimals, with the rounding remainder dumped on the
+// last entry so the parts always sum EXACTLY to `total`. Falls back to an
+// even split if all weights are zero/negative.
+function distributeAmount(total, weights){
+  const n = weights.length;
+  if(n===0) return [];
+  const sumW = weights.reduce((a,b)=>a+b,0);
+  let arr;
+  if(sumW<=0){
+    const base = total/n;
+    arr = weights.map(()=> Math.round(base*100)/100);
+  } else {
+    arr = weights.map(w=> Math.round((total*(w/sumW))*100)/100);
+  }
+  const diff = Math.round((total - arr.reduce((a,b)=>a+b,0))*100)/100;
+  arr[n-1] = Math.round((arr[n-1]+diff)*100)/100;
+  return arr;
 }
 
 /* ---------------------- Generic table parsing (paste or file) ---------------------- */
@@ -294,12 +333,14 @@ function renderDumpStats(){
 /* ---------------------- Step 2: Invoice reference mapping ---------------------- */
 const MAP_PO_CANDS = ['PO#','PO Number','Purchase Order Number'];
 const MAP_INV_CANDS = ['Invoice Number','Invoice Reference'];
+const MAP_AMOUNT_CANDS = ['Invoice Amount','Amount','Target Amount','Invoice Amt'];
 
 function mapScore(headers){
   let s = 0;
   if(findKey(headers, MAP_PO_CANDS)) s += 5;
   if(findKey(headers, MAP_INV_CANDS)) s += 5;
   if(findKey(headers, ['Site'])) s += 1;
+  if(findKey(headers, MAP_AMOUNT_CANDS)) s += 1;
   return s;
 }
 
@@ -308,6 +349,7 @@ function processMap(headers, rows){
     po: findKey(headers, MAP_PO_CANDS),
     site: findKey(headers, ['Site']),
     invNum: findKey(headers, MAP_INV_CANDS),
+    amount: findKey(headers, MAP_AMOUNT_CANDS),
   };
   if(!key.po || !key.invNum){
     const diag = document.getElementById('mapDiag');
@@ -322,6 +364,7 @@ function processMap(headers, rows){
     map[normPO(po)] = {
       site: key.site ? r[key.site] : '',
       invoiceNumber: r[key.invNum],
+      invoiceAmount: key.amount ? parseCurrency(r[key.amount]) : null,
     };
   });
   return {map, count: rows.length};
@@ -356,9 +399,14 @@ function renderMapStats(){
   const poSet = new Set(state.dumpRows.map(r=>r.poNorm));
   const mapKeys = Object.keys(state.invoiceMap);
   const matched = mapKeys.filter(k=>poSet.has(k)).length;
+  const withTarget = mapKeys.filter(k=>{
+    const a = state.invoiceMap[k].invoiceAmount;
+    return a!==null && a!==undefined;
+  }).length;
   document.getElementById('stMapRows').textContent = state.mapRawCount;
   document.getElementById('stMapMatched').textContent = matched;
   document.getElementById('stMapUnmatched').textContent = mapKeys.length - matched;
+  document.getElementById('stMapTarget').textContent = withTarget;
   const badge = document.getElementById('mapBadge');
   if(mapKeys.length){
     badge.textContent = matched + ' matched';
@@ -368,13 +416,14 @@ function renderMapStats(){
 }
 
 /* ---------------------- Step 3->4: Build invoices ---------------------- */
-function buildInvoices(){
+function buildInvoices(opts){
+  opts = opts || {};
   if(!state.dumpRows.length){
-    toast('Import the PO data first (Step 1)', true);
+    if(!opts.silent) toast('Import the PO data first (Step 1)', true);
     return;
   }
   if(!Object.keys(state.invoiceMap).length){
-    toast('Import the invoice reference table first (Step 2)', true);
+    if(!opts.silent) toast('Import the invoice reference table first (Step 2)', true);
     return;
   }
   const vatPercent = parseNum(document.getElementById('vatPercent').value);
@@ -406,14 +455,44 @@ function buildInvoices(){
     const items = groups[poNorm];
     const first = items[0];
     const mapEntry = state.invoiceMap[poNorm];
-    const lineItems = items.map(it=>{
-      const netAmount = it.quantity * it.netUnitPrice * it.netUnitPricePer;
-      const calcVat = netAmount * (vatPercent/100);
+    const targetAmount = (mapEntry.invoiceAmount!==undefined && mapEntry.invoiceAmount!==null)
+      ? mapEntry.invoiceAmount : null;
+
+    // Pass 1: Net amounts only (independent of VAT).
+    const netAmounts = items.map(it => it.quantity * it.netUnitPrice * it.netUnitPricePer);
+    const totalNetRaw = netAmounts.reduce((s,x)=>s+x, 0);
+
+    // Does the global VAT % (Step 3) reproduce the Step 2 target amount?
+    let targetMatched = true;
+    if(targetAmount!==null){
+      const candidateGross = totalNetRaw * (1 + vatPercent/100);
+      targetMatched = Math.abs(candidateGross - targetAmount) <= TARGET_TOLERANCE;
+    }
+    const targetOverridden = (targetAmount!==null) && !targetMatched;
+
+    // Pass 2: build each line item's VAT/Gross figures.
+    let calcVatArr;
+    if(targetOverridden){
+      // The available quantity keeps Net Amount too low (or too high) for
+      // the normal VAT% math to reach the requested Nokia invoice amount.
+      // Per instruction: VAT % -> 0% for this invoice, and the Calculated
+      // VAT Amount is forced to the exact target amount from Step 2
+      // (split across this PO's line items, proportional to each line's
+      // net amount, if there's more than one).
+      calcVatArr = distributeAmount(targetAmount, netAmounts);
+    } else {
+      calcVatArr = netAmounts.map(net => net * (vatPercent/100));
+    }
+
+    const lineItems = items.map((it, i)=>{
+      const netAmount = netAmounts[i];
+      const lineVatPercent = targetOverridden ? 0 : vatPercent;
+      const calcVat = calcVatArr[i];
       const gross = netAmount + calcVat;
       return {
         po: it.poRaw, itemNo: it.itemNo, description: it.description, unit: it.unit,
         quantity: it.quantity, netUnitPrice: it.netUnitPrice, currency: it.currency,
-        netUnitPricePer: it.netUnitPricePer, netAmount, vatPercent, vatAmount: 0,
+        netUnitPricePer: it.netUnitPricePer, netAmount, vatPercent: lineVatPercent, vatAmount: 0,
         calcVat, gross, buyerMaterialCode: it.buyerMaterialCode,
         materialService: 'Material', targetSystem: it.targetSystem, paymentTerms: it.paymentTerms,
         shipFrom: 'IQ', shipTo: 'IQ',
@@ -431,6 +510,7 @@ function buildInvoices(){
       customer: first.customer, customerVat: first.customerVat,
       currency: first.currency, targetSystem: first.targetSystem, paymentTerms: first.paymentTerms,
       vatPercent, lineItems, totalNet, totalVat, totalGross,
+      targetAmount, targetMatched, targetOverridden,
     };
   });
 
@@ -438,30 +518,13 @@ function buildInvoices(){
   state.missingFromDump = missingFromDump;
   renderInvoices();
   autoSave();
-  if(invoices.length){
-    toast(`Built ${invoices.length} invoice(s) from the matched PO list ✓`);
-  } else {
-    toast('No PO numbers matched between Step 1 and Step 2 — nothing to build.', true);
+  if(!opts.silent){
+    if(invoices.length){
+      toast(`Built ${invoices.length} invoice(s) from the matched PO list ✓`);
+    } else {
+      toast('No PO numbers matched between Step 1 and Step 2 — nothing to build.', true);
+    }
   }
-}
-
-function recalcVatOnly(){
-  // live recompute without full rebuild, using current vatPercent input
-  if(!state.invoices.length) return;
-  const vatPercent = parseNum(document.getElementById('vatPercent').value);
-  state.invoices.forEach(inv=>{
-    let totalNet=0, totalVat=0, totalGross=0;
-    inv.vatPercent = vatPercent;
-    inv.lineItems.forEach(li=>{
-      li.vatPercent = vatPercent;
-      li.calcVat = li.netAmount * (vatPercent/100);
-      li.gross = li.netAmount + li.calcVat;
-      totalNet += li.netAmount; totalVat += li.calcVat; totalGross += li.gross;
-    });
-    inv.totalNet=totalNet; inv.totalVat=totalVat; inv.totalGross=totalGross;
-  });
-  renderInvoices();
-  autoSave();
 }
 
 function renderInvoices(){
@@ -477,6 +540,7 @@ function renderInvoices(){
     document.getElementById('sumVat').textContent = '0';
     document.getElementById('sumGross').textContent = '0';
     renderMissingWarning();
+    renderOverrideWarning();
     return;
   }
   empty.style.display='none';
@@ -497,11 +561,13 @@ function renderInvoices(){
           <span class="po">PO ${escHtml(inv.poDisplay)}</span>
           <span class="ref">📄 ${escHtml(inv.invoiceReference)}</span>
           <span class="badge neutral">${inv.lineItems.length} line(s)</span>
+          ${targetBadge(inv)}
         </div>
         <div class="breakdown">
           <span>Net: <b>${fmtNum(inv.totalNet)}</b></span>
           <span>× VAT ${inv.vatPercent}%: <b>${fmtNum(inv.totalVat)}</b></span>
           <span class="gross">= Gross: ${fmtNum(inv.totalGross)} ${escHtml(inv.currency)}</span>
+          ${inv.targetAmount!==null ? `<span>Target: <b>${fmtNum(inv.targetAmount)}</b></span>` : ''}
           <span class="chev">▾</span>
         </div>
       </div>
@@ -514,6 +580,7 @@ function renderInvoices(){
           <span>Target System: <b>${escHtml(inv.targetSystem)}</b></span>
           <span>Payment Terms: <b>${escHtml(inv.paymentTerms)}</b></span>
         </div>
+        ${inv.targetOverridden ? `<div class="warn-list"><b>VAT overridden for this invoice:</b> Net × (1 + ${vatPercentOf(inv)}%) didn't reproduce the target amount (${fmtNum(inv.targetAmount)}), so VAT % was set to 0% and Calculated VAT Amount was forced to that exact target instead.</div>` : ''}
         <table class="mini">
           <thead><tr>
             <th>Item</th><th>Description</th><th>Qty</th><th>Unit Price</th>
@@ -545,7 +612,24 @@ function renderInvoices(){
   document.getElementById('sumGross').textContent = fmtNum(sumGross);
 
   renderMissingWarning();
+  renderOverrideWarning();
   markStepDone(4);
+}
+
+// Badge shown next to each invoice header describing its target-amount status.
+function targetBadge(inv){
+  if(inv.targetAmount===null || inv.targetAmount===undefined) return '';
+  if(inv.targetOverridden){
+    return `<span class="badge gold" title="Net amount can't reach the target via VAT% — VAT set to 0% and Calculated VAT Amount forced to the Step 2 target amount.">⚠ VAT→0%, target forced</span>`;
+  }
+  return `<span class="badge good" title="Gross Amount matches the target invoice amount from Step 2.">✓ Matches target</span>`;
+}
+
+// The VAT % that was actually TESTED against this invoice's target (i.e. the
+// Step 3 global rate), even when the invoice ended up overridden to 0%.
+function vatPercentOf(inv){
+  const el = document.getElementById('vatPercent');
+  return el ? parseNum(el.value) : inv.vatPercent;
 }
 
 function renderMissingWarning(){
@@ -555,6 +639,17 @@ function renderMissingWarning(){
     warnDiv.innerHTML = `<div class="warn-list"><b>Heads up:</b> ${missing.length} PO number(s) from your Step 2 invoice table were not found in the Step 1 PO data, so no invoice could be built for them: ${escHtml(missing.join(', '))}</div>`;
   } else {
     warnDiv.innerHTML = '';
+  }
+}
+
+function renderOverrideWarning(){
+  const box = document.getElementById('overrideWarning');
+  if(!box) return;
+  const overridden = (state.invoices||[]).filter(inv=>inv.targetOverridden);
+  if(overridden.length>0){
+    box.innerHTML = `<div class="warn-list"><b>VAT forced to 0% for ${overridden.length} invoice(s):</b> the available quantity doesn't let Net × (1 + VAT%) reach the Step 2 target amount, so VAT % was set to 0% and Calculated VAT Amount was set to the exact target amount instead for: ${escHtml(overridden.map(i=>i.poDisplay).join(', '))}.</div>`;
+  } else {
+    box.innerHTML = '';
   }
 }
 
@@ -888,7 +983,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
     autoSave();
   });
 
-  document.getElementById('vatPercent').addEventListener('input', recalcVatOnly);
+  // VAT % changes: if invoices were already built, silently rebuild them so
+  // the per-invoice target-amount match/override logic re-runs against the
+  // new rate (it can't be a lightweight "recalc" anymore — matching depends
+  // on the rate itself).
+  document.getElementById('vatPercent').addEventListener('input', ()=>{
+    if(state.invoices.length) buildInvoices({silent:true});
+  });
   document.getElementById('bankAccount').addEventListener('input', autoSave);
   document.getElementById('companyCode').addEventListener('input', autoSave);
 
