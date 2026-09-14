@@ -515,8 +515,16 @@ function buildInvoices(opts){
 
     const lineItems = items.map((it, i)=>{
       const netAmount = netAmounts[i];
-      const lineVatPercent =
-  (targetAmount !== null) ? 0 : vatPercent;
+      const expectedVat =
+  totalNetRaw * (vatPercent/100);
+
+const vatMatchesTarget =
+  targetAmount !== null &&
+  Math.abs(expectedVat - targetAmount) <= TARGET_TOLERANCE;
+
+const lineVatPercent =
+  vatMatchesTarget ? vatPercent :
+  (targetAmount !== null ? 0 : vatPercent);
 ``
       const calcVat = calcVatArr[i];
       const gross = netAmount + calcVat;
