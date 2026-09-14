@@ -361,8 +361,8 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
     <section class="section" id="sec2">
       <div class="card">
         <h3>🔗 Import Invoice Reference Table <span class="badge neutral" id="mapBadge">Not imported yet</span></h3>
-        <p class="hint">Paste or upload the table with columns: <code class="inline">Site</code> · <code class="inline">PO#</code> · <code class="inline">Invoice Number</code>. <b>Only the PO's listed in this table will be built into invoices</b> — any PO from Step 1 that is not listed here will be skipped.</p>
-        <textarea id="mapText" placeholder="Site&#9;PO#&#9;Invoice Number&#10;448&#9;51337869&#9;INV2026-0269 ..."></textarea>
+        <p class="hint">Paste or upload the table with columns: <code class="inline">Site</code> · <code class="inline">PO#</code> · <code class="inline">Invoice Number</code> · <code class="inline">Invoice Amount</code> (optional). <b>Only the PO's listed in this table will be built into invoices</b> — any PO from Step 1 that is not listed here will be skipped. If you add an <code class="inline">Invoice Amount</code> column, that invoice's Gross Amount is checked against it: if the VAT % from Step 3 reproduces it, VAT is applied normally; if it can't (e.g. the available quantity is too low), VAT % is set to 0% and Calculated VAT Amount is forced to that exact target amount instead.</p>
+        <textarea id="mapText" placeholder="Site&#9;PO#&#9;Invoice Number&#9;Invoice Amount&#10;448&#9;51337869&#9;INV2026-0269&#9;IQD 394,515 ..."></textarea>
         <div class="dropzone-row">
           <input type="file" id="mapFile" accept=".xlsx,.xls,.csv,.tsv,.txt">
           <button class="btn-primary" id="btnParseMap">Analyze Table →</button>
@@ -372,6 +372,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
           <div class="stat"><div class="n" id="stMapRows">0</div><div class="l">Invoice numbers imported</div></div>
           <div class="stat"><div class="n" id="stMapMatched">0</div><div class="l">Matched with imported PO's</div></div>
           <div class="stat"><div class="n" id="stMapUnmatched">0</div><div class="l">PO's not found in Step 1 data</div></div>
+          <div class="stat"><div class="n" id="stMapTarget">0</div><div class="l">With a target Invoice Amount</div></div>
         </div>
         <div id="mapDiag"></div>
       </div>
@@ -407,6 +408,8 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
         <div class="warn-list">
           <b>Note:</b>
           VAT Amount always stays zero (the tax is applied only through the VAT % field). Changing VAT % instantly recalculates Calculated VAT Amount and Gross Amount for every line item in the preview — Gross Amount = Net Amount × (1 + VAT% / 100).
+          <br><br>
+          <b>Target amount check (Step 2):</b> if an invoice has a target <code class="inline">Invoice Amount</code> from Step 2, this VAT % is first tested against it. If it reproduces the target (within a small rounding tolerance), it's applied normally. If it doesn't — usually because the available quantity keeps Net Amount too low — that invoice's VAT % is forced to 0% and its Calculated VAT Amount is set to the exact target amount instead, so it can still be matched manually in the export.
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;">
@@ -427,6 +430,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
           <div class="stat"><div class="n" id="sumGross">0</div><div class="l">Total Gross Amount</div></div>
         </div>
         <div id="unmatchedWarning"></div>
+        <div id="overrideWarning"></div>
         <div id="invoiceList" style="margin-top:18px;"></div>
         <div class="empty-state" id="emptyInvoices" style="display:none;">
           <div class="icon">📄</div>
