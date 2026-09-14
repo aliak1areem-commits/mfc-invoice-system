@@ -490,8 +490,12 @@ function buildInvoices(opts){
       // proportional to each line's net amount, if there's more than one).
       calcVatArr = distributeAmount(targetAmount, netAmounts);
     } else {
-      calcVatArr = netAmounts.map(net => net * (vatPercent/100));
-    }
+  if(targetAmount !== null){
+    calcVatArr = distributeAmount(targetAmount, netAmounts);
+  }else{
+    calcVatArr = netAmounts.map(net => net * (vatPercent/100));
+  }
+}
 
     const lineItems = items.map((it, i)=>{
       const netAmount = netAmounts[i];
