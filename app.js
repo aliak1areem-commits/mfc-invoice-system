@@ -489,12 +489,28 @@ function buildInvoices(opts){
       // target amount from Step 2 (split across this PO's line items,
       // proportional to each line's net amount, if there's more than one).
       calcVatArr = distributeAmount(targetAmount, netAmounts);
-    } else {
-  if(targetAmount !== null){
-    calcVatArr = distributeAmount(targetAmount, netAmounts);
-  }else{
-    calcVatArr = netAmounts.map(net => net * (vatPercent/100));
-  }
+    } else if(targetAmount !== null){
+
+    const expectedVat =
+      netAmounts.reduce((s,n)=>s+n,0) * (vatPercent/100);
+
+    const vatMatchesTarget =
+      Math.abs(expectedVat - targetAmount) <= TARGET_TOLERANCE;
+
+    if(vatMatchesTarget){
+        calcVatArr =
+          netAmounts.map(net => net * (vatPercent/100));
+    }else{
+        calcVatArr =
+          distributeAmount(targetAmount, netAmounts);
+    }
+
+}else{
+
+    calcVatArr =
+      netAmounts.map(net => net * (vatPercent/100));
+
+}
 }
 
     const lineItems = items.map((it, i)=>{
