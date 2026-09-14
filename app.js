@@ -489,43 +489,13 @@ function buildInvoices(opts){
       // target amount from Step 2 (split across this PO's line items,
       // proportional to each line's net amount, if there's more than one).
       calcVatArr = distributeAmount(targetAmount, netAmounts);
-    } else if(targetAmount !== null){
-
-    const expectedVat =
-      netAmounts.reduce((s,n)=>s+n,0) * (vatPercent/100);
-
-    const vatMatchesTarget =
-      Math.abs(expectedVat - targetAmount) <= TARGET_TOLERANCE;
-
-    if(vatMatchesTarget){
-        calcVatArr =
-          netAmounts.map(net => net * (vatPercent/100));
-    }else{
-        calcVatArr =
-          distributeAmount(targetAmount, netAmounts);
+    } else {
+      calcVatArr = netAmounts.map(net => net * (vatPercent/100));
     }
-
-}else{
-
-    calcVatArr =
-      netAmounts.map(net => net * (vatPercent/100));
-
-}
-}
 
     const lineItems = items.map((it, i)=>{
       const netAmount = netAmounts[i];
-      const expectedVat =
-  totalNetRaw * (vatPercent/100);
-
-const vatMatchesTarget =
-  targetAmount !== null &&
-  Math.abs(expectedVat - targetAmount) <= TARGET_TOLERANCE;
-
-const lineVatPercent =
-  vatMatchesTarget ? vatPercent :
-  (targetAmount !== null ? 0 : vatPercent);
-``
+      const lineVatPercent = targetOverridden ? 0 : vatPercent;
       const calcVat = calcVatArr[i];
       const gross = netAmount + calcVat;
       return {
@@ -634,12 +604,7 @@ function renderInvoices(){
                 <td>${fmtNum(li.netUnitPrice)}</td>
                 <td>${fmtNum(li.netAmount)}</td>
                 <td>${li.vatPercent}%</td>
-                <td>
-${li.vatPercent > 0
-  ? `${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b>`
-  : `<b>${fmtNum(li.calcVat)}</b> (Target Amount)`
-}
-</td>
+                <td>${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b></td>
                 <td><b>${fmtNum(li.gross)}</b></td>
               </tr>`).join('')}
           </tbody>
