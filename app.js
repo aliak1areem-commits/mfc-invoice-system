@@ -294,6 +294,9 @@ function finishDumpParse(headers, rows){
   state.dumpRawCount = result.totalRows;
   state.excludedCount = result.excluded;
   renderDumpStats();
+  // If invoices were already built earlier, this PO data just changed under
+  // them — rebuild silently so the preview never shows a stale calculation.
+  if(state.invoices.length) buildInvoices({silent:true});
   autoSave();
   toast('PO data analyzed successfully ✓');
 }
@@ -376,6 +379,10 @@ function finishMapParse(headers, rows){
   state.invoiceMap = result.map;
   state.mapRawCount = result.count;
   renderMapStats();
+  // If invoices were already built earlier, the invoice numbers / target
+  // amounts just changed under them — rebuild silently so the preview never
+  // shows a stale calculation (e.g. missing a newly-added Invoice Amount).
+  if(state.invoices.length) buildInvoices({silent:true});
   autoSave();
   toast('Invoice number table analyzed successfully ✓');
 }
@@ -961,10 +968,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('dumpText').value='';
     document.getElementById('dumpFile').value='';
     state.dumpRows=[]; state.dumpRawCount=0; state.excludedCount=0;
+    state.invoices=[]; state.missingFromDump=[];
     document.getElementById('dumpStats').style.display='none';
     document.getElementById('dumpDiag').innerHTML='';
     document.getElementById('dumpBadge').textContent='Not imported yet';
     document.getElementById('dumpBadge').className='badge neutral';
+    renderInvoices();
     autoSave();
   });
 
@@ -976,10 +985,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById('mapText').value='';
     document.getElementById('mapFile').value='';
     state.invoiceMap={}; state.mapRawCount=0;
+    state.invoices=[]; state.missingFromDump=[];
     document.getElementById('mapStats').style.display='none';
     document.getElementById('mapDiag').innerHTML='';
     document.getElementById('mapBadge').textContent='Not imported yet';
     document.getElementById('mapBadge').className='badge neutral';
+    renderInvoices();
     autoSave();
   });
 
