@@ -499,7 +499,9 @@ function buildInvoices(opts){
 
     const lineItems = items.map((it, i)=>{
       const netAmount = netAmounts[i];
-      const lineVatPercent = targetOverridden ? 0 : vatPercent;
+      const lineVatPercent =
+  (targetAmount !== null) ? 0 : vatPercent;
+``
       const calcVat = calcVatArr[i];
       const gross = netAmount + calcVat;
       return {
@@ -608,7 +610,12 @@ function renderInvoices(){
                 <td>${fmtNum(li.netUnitPrice)}</td>
                 <td>${fmtNum(li.netAmount)}</td>
                 <td>${li.vatPercent}%</td>
-                <td>${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b></td>
+                <td>
+${li.vatPercent > 0
+  ? `${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b>`
+  : `<b>${fmtNum(li.calcVat)}</b> (Target Amount)`
+}
+</td>
                 <td><b>${fmtNum(li.gross)}</b></td>
               </tr>`).join('')}
           </tbody>
