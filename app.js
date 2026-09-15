@@ -258,7 +258,7 @@ function processDump(headers, rows){
     const qtyOpen = key.qtyOpen ? parseNum(r[key.qtyOpen]) : 0;
     const qty = key.qty ? parseNum(r[key.qty]) : qtyOpen;
 
-    if(selfBilling || deletedBlocked  ){
+    if(selfBilling || deletedBlocked){
   excluded++;
   return;
 }
@@ -593,7 +593,7 @@ function renderInvoices(){
         <table class="mini">
           <thead><tr>
             <th>Item</th><th>Description</th><th>Qty</th><th>Unit Price</th>
-            <th>Net Amount</th><th>VAT %</th><th>Net × VAT%</th><th>Gross</th>
+            <th>Net Amount</th><th>VAT %</th><th>${inv.targetOverridden ? 'Share of Target' : 'Net × VAT%'}</th><th>Gross</th>
           </tr></thead>
           <tbody>
             ${inv.lineItems.map(li=>`
@@ -604,10 +604,13 @@ function renderInvoices(){
                 <td>${fmtNum(li.netUnitPrice)}</td>
                 <td>${fmtNum(li.netAmount)}</td>
                 <td>${li.vatPercent}%</td>
-                <td>${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b></td>
+                <td>${inv.targetOverridden
+                    ? `${fmtNum(li.netAmount)} / ${fmtNum(inv.totalNet)} × ${fmtNum(inv.targetAmount)} = <b>${fmtNum(li.calcVat)}</b>`
+                    : `${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b>`}</td>
                 <td><b>${fmtNum(li.gross)}</b></td>
               </tr>`).join('')}
           </tbody>
+
         </table>
       </div>
     `;
