@@ -258,7 +258,7 @@ function processDump(headers, rows){
     const qtyOpen = key.qtyOpen ? parseNum(r[key.qtyOpen]) : 0;
     const qty = key.qty ? parseNum(r[key.qty]) : qtyOpen;
 
-    if(selfBilling || deletedBlocked || qtyOpen<=0){
+    if(selfBilling || deletedBlocked || ){
   excluded++;
   return;
 }
