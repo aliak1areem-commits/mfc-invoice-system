@@ -361,7 +361,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
     <section class="section" id="sec2">
       <div class="card">
         <h3>🔗 Import Invoice Reference Table <span class="badge neutral" id="mapBadge">Not imported yet</span></h3>
-        <p class="hint">Paste or upload the table with columns: <code class="inline">Site</code> · <code class="inline">PO#</code> · <code class="inline">Invoice Number</code> · <code class="inline">Invoice Amount</code> (optional). <b>Only the PO's listed in this table will be built into invoices</b> — any PO from Step 1 that is not listed here will be skipped. If you add an <code class="inline">Invoice Amount</code> column, that invoice's Calculated VAT Amount (Net × VAT% from Step 3) is checked against it: if it already covers the target, VAT % is applied normally; if it doesn't, VAT % is set to 0% and Calculated VAT Amount is forced to that exact target amount instead.</p>
+        <p class="hint">Paste or upload the table with columns: <code class="inline">Site</code> · <code class="inline">PO#</code> · <code class="inline">Invoice Number</code> · <code class="inline">Invoice Amount</code> (optional). <b>Only the PO's listed in this table will be built into invoices</b> — any PO from Step 1 that is not listed here will be skipped. The optional <code class="inline">Invoice Amount</code> column is shown next to each invoice in Step 4 purely for reference, so you can compare it against the Gross Amount produced by the rate you pick in Step 3.</p>
         <textarea id="mapText" placeholder="Site&#9;PO#&#9;Invoice Number&#9;Invoice Amount&#10;448&#9;51337869&#9;INV2026-0269&#9;IQD 394,515 ..."></textarea>
         <div class="dropzone-row">
           <input type="file" id="mapFile" accept=".xlsx,.xls,.csv,.tsv,.txt">
@@ -389,7 +389,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
         <p class="hint">These values are applied automatically to every generated invoice.</p>
         <div class="field-row">
           <div class="field vat-field">
-            <label>VAT % (applied to all invoices instantly)</label>
+            <label>Rate % (sets Net Unit Price Per for every line — e.g. 30 → 0.30)</label>
             <div class="suffix"><input type="number" id="vatPercent" value="0" min="0" max="100" step="0.01"></div>
           </div>
           <div class="field">
@@ -407,9 +407,9 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
         </div>
         <div class="warn-list">
           <b>Note:</b>
-          VAT Amount always stays zero (the tax is applied only through the VAT % field). Changing VAT % instantly recalculates Calculated VAT Amount and Gross Amount for every line item in the preview — Gross Amount = Net Amount × (1 + VAT% / 100).
+          VAT is always 0% now — <code class="inline">VAT Amount</code> and <code class="inline">Calculated VAT Amount</code> stay zero for every line, and Gross Amount = Net Amount. The percentage you enter above instead sets <code class="inline">Net Unit Price Per</code> for every line item (e.g. entering 30 sets it to 0.30, entering 70 sets it to 0.70) — <b>Net Amount = Quantity × Net Unit Price × Net Unit Price Per</b>. Changing it instantly recalculates every invoice in the preview.
           <br><br>
-          <b>Target amount check (Step 2):</b> if an invoice has a target <code class="inline">Invoice Amount</code> from Step 2, its Calculated VAT Amount (Net × this VAT %) is checked against that target first. If it already covers the target, VAT % is applied normally. If it falls short, that invoice's VAT % is forced to 0% and its Calculated VAT Amount is set to the exact target amount instead, so it can still be matched manually in the export.
+          <b>Target amount (Step 2):</b> if an invoice has a target <code class="inline">Invoice Amount</code> from Step 2, it's shown next to the invoice in Step 4 for reference only, with a badge showing whether the Gross Amount at your current rate matches it — nothing is forced automatically; adjust the rate above until it lines up.
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;">
@@ -430,7 +430,6 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
           <div class="stat"><div class="n" id="sumGross">0</div><div class="l">Total Gross Amount</div></div>
         </div>
         <div id="unmatchedWarning"></div>
-        <div id="overrideWarning"></div>
         <div id="invoiceList" style="margin-top:18px;"></div>
         <div class="empty-state" id="emptyInvoices" style="display:none;">
           <div class="icon">📄</div>
