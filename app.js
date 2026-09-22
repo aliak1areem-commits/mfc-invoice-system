@@ -458,6 +458,12 @@ function buildInvoices(opts){
   // PO's requested in Step 2 but missing entirely from the Step 1 dump
   const missingFromDump = Object.keys(state.invoiceMap).filter(poNorm => !groups[poNorm]);
 
+  // The Step 3 rate field no longer sets a VAT% — VAT is always 0% now.
+  // Instead, that percentage becomes the "Net Unit Price Per" ratio applied
+  // to every line item: 30% entered -> Net Unit Price Per = 0.30, so
+  // Net Amount = Quantity × Net Unit Price × 0.30.
+  const priceRatio = vatPercent/100;
+
   const invoices = requestedPOs.map(poNorm=>{
     const items = groups[poNorm];
     const first = items[0];
@@ -465,51 +471,26 @@ function buildInvoices(opts){
     const targetAmount = (mapEntry.invoiceAmount!==undefined && mapEntry.invoiceAmount!==null)
       ? mapEntry.invoiceAmount : null;
 
-    // Pass 1: Net amounts only (independent of VAT).
-    const netAmounts = items.map(it => it.quantity * it.netUnitPrice * it.netUnitPricePer);
-    const totalNetRaw = netAmounts.reduce((s,x)=>s+x, 0);
-
-    // Does the Calculated VAT Amount (Net Amount × VAT%, the Step 3 rate)
-    // already cover the Step 2 target invoice amount? If yes, VAT % applies
-    // normally (old behaviour). If Net × VAT% falls short of the target,
-    // that VAT % can't produce this invoice, so it's overridden instead.
-    let targetMatched = true;
-    if(targetAmount!==null){
-      const candidateVat = totalNetRaw * (vatPercent/100);
-      targetMatched = (candidateVat + TARGET_TOLERANCE) >= targetAmount;
-    }
-    const targetOverridden = (targetAmount!==null) && !targetMatched;
-
-    // Pass 2: build each line item's VAT/Gross figures.
-    let calcVatArr;
-    if(targetOverridden){
-      // Net × VAT% doesn't reach the requested Nokia invoice amount. Per
-      // instruction: VAT % -> 0% for this invoice, and the Calculated VAT
-      // Amount is forced to the exact target amount from Step 2 (split
-      // across this PO's line items, proportional to each line's net
-      // amount, if there's more than one).
-      calcVatArr = distributeAmount(targetAmount, netAmounts);
-    } else {
-      calcVatArr = netAmounts.map(net => net * (vatPercent/100));
-    }
-
-    const lineItems = items.map((it, i)=>{
-      const netAmount = netAmounts[i];
-      const lineVatPercent = targetOverridden ? 0 : vatPercent;
-      const calcVat = calcVatArr[i];
-      const gross = netAmount + calcVat;
+    const lineItems = items.map(it=>{
+      const netAmount = it.quantity * it.netUnitPrice * priceRatio;
+      const gross = netAmount; // VAT is always 0%, so Gross = Net.
       return {
         po: it.poRaw, itemNo: it.itemNo, description: it.description, unit: it.unit,
         quantity: it.quantity, netUnitPrice: it.netUnitPrice, currency: it.currency,
-        netUnitPricePer: it.netUnitPricePer, netAmount, vatPercent: lineVatPercent, vatAmount: 0,
-        calcVat, gross, buyerMaterialCode: it.buyerMaterialCode,
+        netUnitPricePer: priceRatio, netAmount, vatPercent: 0, vatAmount: 0,
+        calcVat: 0, gross, buyerMaterialCode: it.buyerMaterialCode,
         materialService: 'Material', targetSystem: it.targetSystem, paymentTerms: it.paymentTerms,
         shipFrom: 'IQ', shipTo: 'IQ',
       };
     });
     const totalNet = lineItems.reduce((s,x)=>s+x.netAmount,0);
-    const totalVat = lineItems.reduce((s,x)=>s+x.calcVat,0);
-    const totalGross = lineItems.reduce((s,x)=>s+x.gross,0);
+    const totalVat = 0;
+    const totalGross = totalNet;
+
+    // Purely informational now (no forcing/override) — lets you see at a
+    // glance whether the ratio you picked lands on the Step 2 target.
+    const targetMatched = targetAmount===null ? null : Math.abs(totalGross - targetAmount) <= TARGET_TOLERANCE;
+
     return {
       poNorm, poDisplay: first.poRaw,
       invoiceReference: mapEntry.invoiceNumber,
@@ -518,8 +499,8 @@ function buildInvoices(opts){
       supplierId: first.supplierId, supplierName: first.supplierName,
       customer: first.customer, customerVat: first.customerVat,
       currency: first.currency, targetSystem: first.targetSystem, paymentTerms: first.paymentTerms,
-      vatPercent, lineItems, totalNet, totalVat, totalGross,
-      targetAmount, targetMatched, targetOverridden,
+      vatPercent: 0, priceRatio, lineItems, totalNet, totalVat, totalGross,
+      targetAmount, targetMatched, targetOverridden: false,
     };
   });
 
@@ -549,7 +530,6 @@ function renderInvoices(){
     document.getElementById('sumVat').textContent = '0';
     document.getElementById('sumGross').textContent = '0';
     renderMissingWarning();
-    renderOverrideWarning();
     return;
   }
   empty.style.display='none';
@@ -573,8 +553,7 @@ function renderInvoices(){
           ${targetBadge(inv)}
         </div>
         <div class="breakdown">
-          <span>Net: <b>${fmtNum(inv.totalNet)}</b></span>
-          <span>× VAT ${inv.vatPercent}%: <b>${fmtNum(inv.totalVat)}</b></span>
+          <span>Net Unit Price Per: <b>${inv.priceRatio}</b></span>
           <span class="gross">= Gross: ${fmtNum(inv.totalGross)} ${escHtml(inv.currency)}</span>
           ${inv.targetAmount!==null ? `<span>Target: <b>${fmtNum(inv.targetAmount)}</b></span>` : ''}
           <span class="chev">▾</span>
@@ -589,11 +568,11 @@ function renderInvoices(){
           <span>Target System: <b>${escHtml(inv.targetSystem)}</b></span>
           <span>Payment Terms: <b>${escHtml(inv.paymentTerms)}</b></span>
         </div>
-        ${inv.targetOverridden ? `<div class="warn-list"><b>VAT overridden for this invoice:</b> Calculated VAT Amount (Net × VAT% = ${fmtNum(inv.totalNet)} × ${vatPercentOf(inv)}%) doesn't cover the target amount (${fmtNum(inv.targetAmount)}), so VAT % was set to 0% and Calculated VAT Amount was forced to that exact target instead.</div>` : ''}
+        ${(inv.targetAmount!==null && !inv.targetMatched) ? `<div class="warn-list"><b>Heads up:</b> Gross Amount (${fmtNum(inv.totalGross)}) doesn't match the Step 2 target (${fmtNum(inv.targetAmount)}) at this ratio — adjust the rate in Step 3 if you need an exact match.</div>` : ''}
         <table class="mini">
           <thead><tr>
             <th>Item</th><th>Description</th><th>Qty</th><th>Unit Price</th>
-            <th>Net Amount</th><th>VAT %</th><th>${inv.targetOverridden ? 'Share of Target' : 'Net × VAT%'}</th><th>Gross</th>
+            <th>Net Unit Price Per</th><th>Net Amount</th><th>VAT %</th><th>Gross</th>
           </tr></thead>
           <tbody>
             ${inv.lineItems.map(li=>`
@@ -602,11 +581,9 @@ function renderInvoices(){
                 <td>${escHtml(li.description)}</td>
                 <td>${fmtNum(li.quantity)}</td>
                 <td>${fmtNum(li.netUnitPrice)}</td>
-                <td>${fmtNum(li.netAmount)}</td>
-                <td>${li.vatPercent}%</td>
-                <td>${inv.targetOverridden
-                    ? `${fmtNum(li.netAmount)} / ${fmtNum(inv.totalNet)} × ${fmtNum(inv.targetAmount)} = <b>${fmtNum(li.calcVat)}</b>`
-                    : `${fmtNum(li.netAmount)} × ${li.vatPercent}% = <b>${fmtNum(li.calcVat)}</b>`}</td>
+                <td>${li.netUnitPricePer}</td>
+                <td>${fmtNum(li.netUnitPrice)} × ${li.netUnitPricePer} × ${fmtNum(li.quantity)} = <b>${fmtNum(li.netAmount)}</b></td>
+                <td>0%</td>
                 <td><b>${fmtNum(li.gross)}</b></td>
               </tr>`).join('')}
           </tbody>
@@ -624,24 +601,18 @@ function renderInvoices(){
   document.getElementById('sumGross').textContent = fmtNum(sumGross);
 
   renderMissingWarning();
-  renderOverrideWarning();
   markStepDone(4);
 }
 
-// Badge shown next to each invoice header describing its target-amount status.
+// Badge shown next to each invoice header — purely informational, comparing
+// the computed Gross Amount (at the current Net Unit Price Per ratio)
+// against the Step 2 target amount. Nothing is forced/overridden anymore.
 function targetBadge(inv){
   if(inv.targetAmount===null || inv.targetAmount===undefined) return '';
-  if(inv.targetOverridden){
-    return `<span class="badge gold" title="Calculated VAT Amount (Net × VAT%) doesn't reach the target — VAT set to 0% and Calculated VAT Amount forced to the Step 2 target amount.">⚠ VAT→0%, target forced</span>`;
+  if(inv.targetMatched){
+    return `<span class="badge good" title="Gross Amount matches the target invoice amount from Step 2 at this ratio.">✓ Matches target</span>`;
   }
-  return `<span class="badge good" title="Calculated VAT Amount (Net × VAT%) already covers the target invoice amount from Step 2 — VAT % applied normally.">✓ VAT covers target</span>`;
-}
-
-// The VAT % that was actually TESTED against this invoice's target (i.e. the
-// Step 3 global rate), even when the invoice ended up overridden to 0%.
-function vatPercentOf(inv){
-  const el = document.getElementById('vatPercent');
-  return el ? parseNum(el.value) : inv.vatPercent;
+  return `<span class="badge gold" title="Gross Amount doesn't match the target invoice amount from Step 2 at this ratio.">≠ Off target</span>`;
 }
 
 function renderMissingWarning(){
@@ -651,17 +622,6 @@ function renderMissingWarning(){
     warnDiv.innerHTML = `<div class="warn-list"><b>Heads up:</b> ${missing.length} PO number(s) from your Step 2 invoice table were not found in the Step 1 PO data, so no invoice could be built for them: ${escHtml(missing.join(', '))}</div>`;
   } else {
     warnDiv.innerHTML = '';
-  }
-}
-
-function renderOverrideWarning(){
-  const box = document.getElementById('overrideWarning');
-  if(!box) return;
-  const overridden = (state.invoices||[]).filter(inv=>inv.targetOverridden);
-  if(overridden.length>0){
-    box.innerHTML = `<div class="warn-list"><b>VAT forced to 0% for ${overridden.length} invoice(s):</b> Calculated VAT Amount (Net × VAT%) doesn't reach the Step 2 target amount, so VAT % was set to 0% and Calculated VAT Amount was set to the exact target amount instead for: ${escHtml(overridden.map(i=>i.poDisplay).join(', '))}.</div>`;
-  } else {
-    box.innerHTML = '';
   }
 }
 
