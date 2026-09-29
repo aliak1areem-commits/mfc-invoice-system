@@ -389,7 +389,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
         <p class="hint">These values are applied automatically to every generated invoice.</p>
         <div class="field-row">
           <div class="field vat-field">
-            <label>Rate % (sets Net Unit Price Per for every line — e.g. 30 → 0.30)</label>
+            <label>Rate % (scales Quantity for every line — e.g. 30 → Qty × 0.30)</label>
             <div class="suffix"><input type="number" id="vatPercent" value="0" min="0" max="100" step="0.01"></div>
           </div>
           <div class="field">
@@ -407,7 +407,7 @@ code.inline{background:var(--ice);padding:1px 6px;border-radius:5px;font-family:
         </div>
         <div class="warn-list">
           <b>Note:</b>
-          VAT is always 0% now — <code class="inline">VAT Amount</code> and <code class="inline">Calculated VAT Amount</code> stay zero for every line, and Gross Amount = Net Amount. The percentage you enter above instead sets <code class="inline">Net Unit Price Per</code> for every line item (e.g. entering 30 sets it to 0.30, entering 70 sets it to 0.70) — <b>Net Amount = Quantity × Net Unit Price × Net Unit Price Per</b>. Changing it instantly recalculates every invoice in the preview.
+          VAT is always 0% now — <code class="inline">VAT Amount</code> and <code class="inline">Calculated VAT Amount</code> stay zero for every line, and Gross Amount = Net Amount. The percentage you enter above instead scales <code class="inline">Quantity</code> for every line item (e.g. entering 30 turns a Qty of 1 into 0.3, a Qty of 2 into 0.6) — <b>Net Amount = (Quantity × rate) × Net Unit Price × Net Unit Price Per</b>, with Net Unit Price Per left exactly as imported from Step 1 (defaulting to 1). Changing the rate instantly recalculates every invoice in the preview.
           <br><br>
           <b>Target amount (Step 2):</b> if an invoice has a target <code class="inline">Invoice Amount</code> from Step 2, it's shown next to the invoice in Step 4 for reference only, with a badge showing whether the Gross Amount at your current rate matches it — nothing is forced automatically; adjust the rate above until it lines up.
         </div>
