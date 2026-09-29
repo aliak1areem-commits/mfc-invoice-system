@@ -459,9 +459,10 @@ function buildInvoices(opts){
   const missingFromDump = Object.keys(state.invoiceMap).filter(poNorm => !groups[poNorm]);
 
   // The Step 3 rate field no longer sets a VAT% — VAT is always 0% now.
-  // Instead, that percentage becomes the "Net Unit Price Per" ratio applied
-  // to every line item: 30% entered -> Net Unit Price Per = 0.30, so
-  // Net Amount = Quantity × Net Unit Price × 0.30.
+  // It also no longer touches Net Unit Price Per. Instead, it scales the
+  // Quantity itself: 30% entered -> Quantity × 0.30 (e.g. Qty 1 -> 0.3,
+  // Qty 2 -> 0.6), and Net Unit Price Per stays whatever came from the
+  // Step 1 PO dump (defaulting to 1, exactly as before this change).
   const priceRatio = vatPercent/100;
 
   const invoices = requestedPOs.map(poNorm=>{
@@ -472,12 +473,13 @@ function buildInvoices(opts){
       ? mapEntry.invoiceAmount : null;
 
     const lineItems = items.map(it=>{
-      const netAmount = it.quantity * it.netUnitPrice * priceRatio;
+      const scaledQuantity = it.quantity * priceRatio;
+      const netAmount = scaledQuantity * it.netUnitPrice * it.netUnitPricePer;
       const gross = netAmount; // VAT is always 0%, so Gross = Net.
       return {
         po: it.poRaw, itemNo: it.itemNo, description: it.description, unit: it.unit,
-        quantity: it.quantity, netUnitPrice: it.netUnitPrice, currency: it.currency,
-        netUnitPricePer: priceRatio, netAmount, vatPercent: 0, vatAmount: 0,
+        quantity: scaledQuantity, netUnitPrice: it.netUnitPrice, currency: it.currency,
+        netUnitPricePer: it.netUnitPricePer, netAmount, vatPercent: 0, vatAmount: 0,
         calcVat: 0, gross, buyerMaterialCode: it.buyerMaterialCode,
         materialService: 'Material', targetSystem: it.targetSystem, paymentTerms: it.paymentTerms,
         shipFrom: 'IQ', shipTo: 'IQ',
@@ -553,7 +555,7 @@ function renderInvoices(){
           ${targetBadge(inv)}
         </div>
         <div class="breakdown">
-          <span>Net Unit Price Per: <b>${inv.priceRatio}</b></span>
+          <span>Rate: <b>${inv.priceRatio}</b> (Qty × rate)</span>
           <span class="gross">= Gross: ${fmtNum(inv.totalGross)} ${escHtml(inv.currency)}</span>
           ${inv.targetAmount!==null ? `<span>Target: <b>${fmtNum(inv.targetAmount)}</b></span>` : ''}
           <span class="chev">▾</span>
@@ -568,10 +570,10 @@ function renderInvoices(){
           <span>Target System: <b>${escHtml(inv.targetSystem)}</b></span>
           <span>Payment Terms: <b>${escHtml(inv.paymentTerms)}</b></span>
         </div>
-        ${(inv.targetAmount!==null && !inv.targetMatched) ? `<div class="warn-list"><b>Heads up:</b> Gross Amount (${fmtNum(inv.totalGross)}) doesn't match the Step 2 target (${fmtNum(inv.targetAmount)}) at this ratio — adjust the rate in Step 3 if you need an exact match.</div>` : ''}
+        ${(inv.targetAmount!==null && !inv.targetMatched) ? `<div class="warn-list"><b>Heads up:</b> Gross Amount (${fmtNum(inv.totalGross)}) doesn't match the Step 2 target (${fmtNum(inv.targetAmount)}) at this rate — adjust the rate in Step 3 if you need an exact match.</div>` : ''}
         <table class="mini">
           <thead><tr>
-            <th>Item</th><th>Description</th><th>Qty</th><th>Unit Price</th>
+            <th>Item</th><th>Description</th><th>Qty (scaled)</th><th>Unit Price</th>
             <th>Net Unit Price Per</th><th>Net Amount</th><th>VAT %</th><th>Gross</th>
           </tr></thead>
           <tbody>
@@ -582,7 +584,7 @@ function renderInvoices(){
                 <td>${fmtNum(li.quantity)}</td>
                 <td>${fmtNum(li.netUnitPrice)}</td>
                 <td>${li.netUnitPricePer}</td>
-                <td>${fmtNum(li.netUnitPrice)} × ${li.netUnitPricePer} × ${fmtNum(li.quantity)} = <b>${fmtNum(li.netAmount)}</b></td>
+                <td>${fmtNum(li.quantity)} × ${fmtNum(li.netUnitPrice)} × ${li.netUnitPricePer} = <b>${fmtNum(li.netAmount)}</b></td>
                 <td>0%</td>
                 <td><b>${fmtNum(li.gross)}</b></td>
               </tr>`).join('')}
